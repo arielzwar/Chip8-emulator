@@ -1,11 +1,10 @@
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <sys/stat.h>
+#include <string.h>
 #include <unistd.h>
-#include <stdint.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <time.h>
 //#include "graphics.h"
 
 #define CHUNK 10
@@ -16,12 +15,13 @@ int ldROM(char* path);
 int fetch(char* ram2);
 void end();
 
-char registers[16] = { 0 };
+unsigned char registers[16] = { 0 };
 int registerI = 0;
 int registerF = 0;
-char ram[4096];
+unsigned char ram[4096];
 int pc = 512;
-int sp = STACK-1;
+unsigned short stack[16];
+unsigned char sp = 0;
 
 int main(int argc, char** argv)
 {
@@ -34,11 +34,10 @@ int main(int argc, char** argv)
     int opcode = 0;
 	int fileSize = ldROM(argv[1]);
     
-    for(i = 0; i <  (int)(fileSize / 2); i++)
+    for (i = 0; i < 1460; i++)
     {
-        opcode = fetch(ram+pc);
-        pc += 2;
-        
+        unsigned short opcode = (unsigned char)ram[pc] << 8 | (unsigned char)ram[pc + 1];
+        pc += 2; 
         decode(opcode);
     }
 
@@ -54,13 +53,13 @@ int main(int argc, char** argv)
 int fetch(char *ram2)
 {   
     int opcode = 0;
-    char strOPCODE[2] = {0};
+    unsigned char strOPCODE[2] = {0};
     
     memcpy(strOPCODE, ram2, 2);
     
     //change the order of the bytes in memory because of little endian.
-    opcode += (unsigned char)(strOPCODE[0]);
-    opcode = (opcode << 8) + (unsigned char)(strOPCODE[1]);
+    opcode += strOPCODE[0];
+    opcode = (opcode << 8) + strOPCODE[1];
 
     return opcode;
 }
@@ -74,7 +73,6 @@ int fetch(char *ram2)
 int ldROM(char* path)
 {
 	int read_bytes = 0;
-	int already_read = 512;
 
 	int fd = open(path, O_RDONLY);
 	if (fd == -1)
@@ -82,11 +80,8 @@ int ldROM(char* path)
 		printf("Cannot load the Rom file...\n");
 		exit(0);
 	}
-	while((read_bytes = read(fd, ram + already_read, CHUNK)) > 0)
-	{
-		already_read += read_bytes;
-	}	
-	return (already_read-512);
+	read_bytes = read(fd, ram + 512, 4096 - 512);
+	return read_bytes;
 }
 
 /*
@@ -96,11 +91,11 @@ int ldROM(char* path)
  */
 void decode(int opcode)
 {
-    char tmpStr[5] = { 0 };
     int opcodeDATA = opcode & 0x0FFF;
     int i = 0;
+    int rnd = 0;
 
-    printf("DECODE: %04x \n", opcode);
+    printf("%04x: %04x\n", pc-2, opcode);
     switch(opcode >> 12)
     {
         case 0:
@@ -109,54 +104,103 @@ void decode(int opcode)
                 printf("CLS\n");
             }
             else if (opcode == 0x00EE)
-            {   
-                printf("0\n");
-                if (sp == STACK-1)
-                {
-                    printf("Error opcode 00EE");
-                    exit(0);
-                }
-                printf("1\n");
-                //printf("SP -> %02x %02x",ram[sp], ram[sp+1]);
-               // pc = fetch(ram+sp); 
-               // sp += 2;
-                //printf("PC AFTER RET: d: %d x: %04x", pc, pc);
-               // printf("RET");
+            {
+                sp--;   
+                pc = stack[sp]; 
+                printf("stack[%d] = %x\n", sp, stack[sp]);
             }
             else
             {
                 pc = opcodeDATA;
-             //   printf("SYS addr (0)");
             }
             break;
         case 1:
             pc = opcodeDATA;
-           // printf("JUMP addr (1): %04x\n", opcodeDATA);
             break;
         case 2:
-           /* ntos(pc, tmpStr);
-            sp -= 4;
-            strncpy(ram+sp, tmpStr, 4);
-            pc = opcodeDATA;*/
+            printf("1. stack[%d] = %x\n", sp, stack[sp]);
+            stack[sp] = pc; 
+            printf("2. stack[%d] = %x\n", sp, stack[sp]);
+            sp++;
+            pc = opcodeDATA;
             break;
-        case 3:
-           // printf("3xkk\n");
-            //printf("reg[opDt >> 8] = %x = opDt & 0xFF = %x | opDATA >> 8: %x", registers[opcodeDATA >> 8], (opcodeDATA & 0xFF), (opcodeDATA >> 8));
+        case 3: 
+            printf("V[%d] = %x\n", (opcodeDATA >> 8), registers[(opcodeDATA >> 8)]);
             if (registers[(opcodeDATA >> 8)] == (opcodeDATA & 0xFF))
             {
                 pc += 2;
             }
             break;
+        case 4:
+            if (registers[(opcodeDATA >> 8)] != (opcodeDATA & 0xFF))
+            {
+                pc += 2;
+            }
+            break;
+        case 5:
+            if (registers[(opcodeDATA >> 8)] == registers[((opcodeDATA & 0xFF) >> 4)])
+            {
+                pc += 2;
+            }
+            break;
         case 6:
-           // printf("6xkk\n");
-            //printf("opcodeDATA >> 8 = %x = opcodeDATA & 0xFF = %x\n", (opcodeDATA >> 8), (opcodeDATA & 0xFF));
+            printf("1. V[%d] = %x\n", (opcodeDATA >> 8), registers[(opcodeDATA >> 8)]);
             registers[(opcodeDATA >> 8)] = opcodeDATA & 0xFF;
+            printf("2. V[%d] = %x\n", (opcodeDATA >> 8), registers[(opcodeDATA >> 8)]);
+            break;
+        case 7:
+            printf("1. V[%d] = %x\n", (opcodeDATA >> 8), registers[(opcodeDATA >> 8)]);
+            registers[(opcodeDATA >> 8)] += (opcodeDATA & 0xFF); 
+            printf("2. V[%d] = %x\n", (opcodeDATA >> 8), registers[(opcodeDATA >> 8)]);
             break;
         case 8:
-           // printf("8xy6\n");
-            //printf("reg[opDt >> 8] = %x\n", registers[(opcodeDATA >> 8)]);
-            if ((opcodeDATA & 0xF) == 0x6)
+            if ((opcodeDATA & 0xF) == 0x0)
             {
+                printf("V[%d] = %x | V[%d] = %x\n", (opcodeDATA >> 8), registers[(opcodeDATA >> 8)], (opcodeDATA >> 4) & 0x0F, registers[(opcodeDATA >> 4) & 0x0F]);
+                registers[(opcodeDATA >> 8)] = registers[((opcodeDATA & 0xFF) >> 4)];
+                printf("V[%d] = %x\n", (opcodeDATA >> 8), registers[(opcodeDATA >> 8)]);
+            }
+            else if ((opcodeDATA & 0xF) == 0x1)
+            { 
+                registers[(opcodeDATA >> 8)] |= registers[((opcodeDATA & 0xFF) >> 4)];
+            }
+            else if ((opcodeDATA & 0xF) == 0x2)
+            { 
+                registers[(opcodeDATA >> 8)] &= registers[((opcodeDATA & 0xFF) >> 4)];
+            }
+            else if ((opcodeDATA & 0xF) == 0x3)
+            { 
+                registers[(opcodeDATA >> 8)] ^= registers[((opcodeDATA & 0xFF) >> 4)];
+            }
+            else if ((opcodeDATA & 0xF) == 0x4)
+            { 
+                printf("1. V[%d] = %x\n", (opcodeDATA >> 8), registers[(opcodeDATA >> 8)]);
+                if ((registers[(opcodeDATA >> 8)] + registers[((opcodeDATA & 0xFF) >> 4)]) > 255)
+                {
+                   registerF = 1;
+                }
+                else
+                {
+                    registerF = 0;
+                }
+                registers[(opcodeDATA >> 8)] += registers[((opcodeDATA & 0xFF) >> 4)];
+                printf("2. V[%d] = %x\n", (opcodeDATA >> 8), registers[(opcodeDATA >> 8)]);
+            }
+            else if ((opcodeDATA & 0xF) == 0x5)
+            { 
+                if (registers[(opcodeDATA >> 8)] > registers[((opcodeDATA & 0xFF) >> 4)])
+                {
+                   registerF = 1;
+                }
+                else
+                {
+                    registerF = 0;
+                }
+                registers[(opcodeDATA >> 8)] -= registers[((opcodeDATA & 0xFF) >> 4)];
+            }
+            else if ((opcodeDATA & 0xF) == 0x6)
+            {
+                printf("V[%d] = %x\n", (opcodeDATA >> 8), registers[(opcodeDATA >> 8)]);
                 if ((registers[(opcodeDATA >> 8)] & 0b1))
                 {
                     registerF = 1;
@@ -166,29 +210,121 @@ void decode(int opcode)
                     registerF = 0;
                 }
                 registers[(opcodeDATA >> 8)] = registers[(opcodeDATA >> 8)] >> 1; 
+                printf("FLAG = %d | V[%d] = %x\n", registerF,(opcodeDATA>>8),registers[(opcodeDATA >> 8)]);
+            }
+            else if ((opcodeDATA & 0xF) == 0x7)
+            { 
+                if (registers[(opcodeDATA >> 8)] < registers[((opcodeDATA & 0xFF) >> 4)])
+                {
+                   registerF = 1;
+                }
+                else
+                {
+                    registerF = 0;
+                }
+                registers[(opcodeDATA >> 8)] = registers[((opcodeDATA & 0xFF) >> 4)] - registers[(opcodeDATA >> 8)];
+            }
+            else if ((opcodeDATA & 0xF) == 0xE)
+            {
+                printf("V[%d] = %x\n", (opcodeDATA >> 8), registers[(opcodeDATA >> 8)]);
+                if ((registers[(opcodeDATA >> 8)] & 0b10000000))
+                {
+                    registerF = 1;
+                }
+                else
+                {
+                    registerF = 0;
+                }
+                registers[(opcodeDATA >> 8)] = registers[(opcodeDATA >> 8)] << 1;  
+                printf("FLAG = %d | V[%d] = %x\n", registerF,(opcodeDATA>>8),registers[(opcodeDATA >> 8)]);
+            }
 
+            break;
+        case 9:
+            printf("V[%d] = %x\n", (opcodeDATA >> 8), registers[(opcodeDATA >> 8)]); 
+            printf("V[%d] = %x\n", ((opcodeDATA & 0xFF) >> 4), registers[((opcodeDATA & 0xFF) >> 4)]);
+            if (registers[(opcodeDATA >> 8)] != registers[((opcodeDATA & 0xFF) >> 4)])
+            {
+                pc += 2;
             }
             break;
         case 0xA:
             registerI = opcodeDATA;
-            //printf("Register I = %04x", registerI);
+            printf("I = %x\n", opcodeDATA);
+            break;
+        case 0xB:
+            pc = registers[0] + opcodeDATA;
+            break;
+        case 0xC:
+            srand(time(NULL));
+            rnd = (rand() % 255);
+            registers[(opcodeDATA >> 8)] = rnd & (opcodeDATA & 0xFF);
+            break;
+        case 0xD:
+            printf("Display n-byte sprite\n");
+            break;
+        case 0xE:
+            if ((opcodeDATA & 0xF) == 0xE)
+            {
+                printf("Keyboard is pressed\n");
+            }
+            else
+            {
+                printf("Keyboard isnt pressed\n");
+            }
             break;
         case 0xF:
-            if ((opcode & 0xFF) == 0x65)
+            if ((opcodeDATA & 0xF) == 0x7)
             {
-               // printf("Fx65\n");
+                printf("Timer delay\n");
+            }
+            else if ((opcodeDATA & 0xF) == 0xA)
+            {
+                printf("Wait for key press\n");
+            }
+            else if ((opcodeDATA & 0xFF) == 0x15)
+            {
+                printf("Timer delay set\n");
+            }
+            else if ((opcodeDATA & 0xF) == 0x8)
+            {
+                printf("Sound timer\n");
+            }
+            else if ((opcodeDATA & 0xF) == 0xE)
+            {
+                printf("I = %x | V[%d] = %x\n", registerI, (opcodeDATA >> 8), registers[(opcodeDATA >> 8)]);
+                registerI += (unsigned char)registers[(opcodeDATA >> 8)];
+                printf("I = %x\n", registerI);
+            }
+            else if ((opcodeDATA & 0xF) == 0x9)
+            {
+                printf("Location of sprite\n");
+            }
+            else if ((opcodeDATA & 0xF) == 0x3)
+            {
+                ram[registerI + 2] = (unsigned char)registers[(opcodeDATA >> 8)] % 10;
+                ram[registerI + 1] = ((unsigned char)registers[(opcodeDATA >> 8)] % 100) - ram[registerI + 2];
+                ram[registerI] =  ((unsigned char)registers[(opcodeDATA >> 8)]) - ram[registerI + 1];
+            }
+            else if ((opcodeDATA & 0xFF) == 0x55)
+            {
+                for (i = 0; i <= (opcodeDATA >> 8); i++)
+                {
+                    ram[registerI + i] = registers[i]; 
+                }
+            }
+            else if ((opcodeDATA & 0xFF) == 0x65)
+            {
+                printf("I = %x\n", registerI);
                 for (i = 0; i <= (opcodeDATA >> 8); i++)
                 {
                     registers[i] = ram[registerI + i];
-                   // printf("registers[%d] = %02x\n", i, registers[i]);
-                   // printf("registerI = %04x\n", registerI);
-                   // printf("ram[RegI] = %02x\n", ram[registerI+i]);
+                    printf("V[%d] = %x | ram[I + i] = %x\n", i, registers[i], ram[registerI + i]);
                 }
             }
             break;
         default:
-            printf("Default...\n");
-            printf("OPCODE & 0xF000: %01x | %d\n", opcode >> 12, opcode & 0xF000);
+            printf("DEFAULT: ");
             break;        
     }
 }
